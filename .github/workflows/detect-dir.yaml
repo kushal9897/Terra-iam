@@ -25,11 +25,7 @@ jobs:
       shell: bash
       run: |
          git fetch origin main
-         git diff --name-only origin/main HEAD \ 
-         grep '^namespaces/' \
-          xargs -n1 dirname \
-             sort -u
-
+         git diff --name-only origin/main HEAD | grep '^namespaces/' | xargs -n1 dirname | sort -u
 
           if [[ -z "$changed_dirs" ]]; then
             echo "No namespaces changed."
