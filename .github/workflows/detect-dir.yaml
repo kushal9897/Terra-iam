@@ -23,9 +23,8 @@ jobs:
 
     - name: find dir
       run: |
-       git fetch origin main 
-       git diff --name-only HEAD~1 HEAD | ForEach-Object { Split-Path $_ -Parent } | Sort-Object -Unique
-       echo "git diff --name-only HEAD~1 HEAD | ForEach-Object { Split-Path $_ -Parent } | Sort-Object -Unique"
-   
+       git fetch origin main
+       git diff --name-only HEAD~1 HEAD | xargs -n1 dirname | sort -u
+       echo "git diff --name-only HEAD~1 HEAD | xargs -n1 dirname | sort -u"
 
   
