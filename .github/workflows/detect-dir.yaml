@@ -1,0 +1,31 @@
+name: Terraform Deploy (GitHub-hosted Runner)
+on:
+ pull_request:
+    branches:
+     - main
+  
+jobs:
+ terraform:
+  name: Terraform-Deploy
+  runs-on: ubuntu-latest
+
+  defaults:
+      run:
+        working-directory: terraform-projects 
+
+  env: 
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+  steps:
+    - name: checkout-code
+      uses: actions/checkout@v4
+
+    - name: find dir
+      run: |
+       git fetch origin main 
+       git diff --name-only origin/main...HEAD | xargs -n1 dirname | sort -u
+       printf "%s\n" "$dirs"
+   
+
+  
