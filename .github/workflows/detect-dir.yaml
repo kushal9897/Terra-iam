@@ -56,9 +56,10 @@ jobs:
         changed_dirs=$(printf "%s\n" "$changed_files" \
           | xargs -n1 dirname \
           | sort -u \
-          | jq -R . | jq -s .)
+          | jq -R . | jq -s -c .)
 
-        # 5. Print and export JSON array for matrix use
-        echo "Changed namespace directories:"
-        printf "%s\n" "$changed_dirs" | jq -C .
+        # Print for human readability
+        echo "Changed namespace directories: $changed_dirs"
+
+        # Export for use as a matrix or later steps
         echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
