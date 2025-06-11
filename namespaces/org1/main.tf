@@ -3,5 +3,5 @@ module "team_aa" {
   ami           = var.ami
   instance_type = "t2.micro"
   name          = "team-a-instance"
-  team          = "team-aaam"
+  team          = "team-a"
 }

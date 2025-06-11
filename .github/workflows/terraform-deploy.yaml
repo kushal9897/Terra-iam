@@ -1,0 +1,43 @@
+name: Terraform Deploy (GitHub-hosted Runner)
+on:
+ pull_request:
+    branches:
+     - main
+  
+jobs:
+ terraform:
+  name: Terraform-Deploy
+  runs-on: ubuntu-latest
+
+  defaults:
+      run:
+        working-directory: terraform-projects 
+
+  env: 
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+  steps:
+    - name: checkout-code
+      uses: actions/checkout@v4
+        
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+    
+    - name: terraform-init
+      run: terraform init  
+
+    - name: terraform-plan
+      run: |
+       terraform plan
+       echo "Sleeping for 5 minutes..."
+       sleep 300
+      
+    # - name: terraform apply -auto-approve
+    #   run: |
+    #     terraform apply -auto-approve
+    #     echo "Sleeping for 5 minutes..."
+    #     sleep 300
+      
+    # - name: terraform destroy
+    #   run: terraform destroy -auto-approve
