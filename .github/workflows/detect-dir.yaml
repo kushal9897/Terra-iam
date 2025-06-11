@@ -21,15 +21,44 @@ jobs:
     - name: checkout-code
       uses: actions/checkout@v4
 
-    - name: find dir
+    # - name: find dir
+    #   shell: bash
+    #   run: |
+    #      git fetch origin main
+    #      git diff --name-only origin/main HEAD | grep '^namespaces/' | xargs -n1 dirname | sort -u
+
+    #       if [[ -z "$changed_dirs" ]]; then
+    #         echo "No namespaces changed."
+    #       else
+    #         printf "Changed namespace directories:\n%s\n" "$changed_dirs"
+    #         echo "dirs=$matrix" >> $GITHUB_OUTPUT
+    #       fi
+
+    - name: Find changed namespace dirs
+      id: find_dirs
       shell: bash
       run: |
-         git fetch origin main
-         git diff --name-only origin/main HEAD | grep '^namespaces/' | xargs -n1 dirname | sort -u
+        # 1. Fetch remote main
+        git fetch origin main
 
-          if [[ -z "$changed_dirs" ]]; then
-            echo "No namespaces changed."
-          else
-            printf "Changed namespace directories:\n%s\n" "$changed_dirs"
-            echo "dirs=$matrix" >> $GITHUB_OUTPUT
-          fi
+        # 2. Get changed files under namespaces/, or empty
+        changed_files=$(git diff --name-only origin/main HEAD \
+          | grep '^namespaces/' || true)
+
+        # 3. Bail if none
+        if [[ -z "$changed_files" ]]; then
+          echo "No namespaces changed."
+          echo "dirs=[]" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        # 4. Compute unique directory names
+        changed_dirs=$(printf "%s\n" "$changed_files" \
+          | xargs -n1 dirname \
+          | sort -u \
+          | jq -R . | jq -s .)
+
+        # 5. Print and export JSON array for matrix use
+        echo "Changed namespace directories:"
+        printf "%s\n" "$changed_dirs" | jq -C .
+        echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
