@@ -53,7 +53,7 @@ jobs:
    runs-on: ubuntu-latest
    strategy:
       matrix:
-        dir: ${{ fromJson(needs.find_changed.outputs.dirs) }}
+        dir: ${{ fromJson(needs.terraform.outputs.dirs) }}
    steps:
      - name: Checkout code
        uses: actions/checkout@v4
