@@ -23,11 +23,12 @@ jobs:
 
     - name: find dir
       run: |
-        # fetch up-to-date main
-        git fetch origin main
+         ls
+         # fetch up-to-date main
+         git fetch origin main
 
-        # list changed files vs. main, map to dirs, dedupe
-        git diff --name-only origin/main...HEAD \
+         # list changed files vs. main, map to dirs, dedupe
+         git diff --name-only origin/main...HEAD \
           | xargs -n1 dirname \
           | sort -u
   
