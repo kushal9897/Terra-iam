@@ -24,16 +24,12 @@ jobs:
     - name: find dir
       shell: bash
       run: |
-          # Make sure we have main locally
-          git fetch origin main
+         git fetch origin main
+         git diff --name-only origin/main HEAD \ 
+         grep '^namespaces/' \
+          xargs -n1 dirname \
+             sort -u
 
-          # Diff against origin/main and filter only under namespaces/
-          changed_dirs=$(
-            git diff --name-only origin/main...HEAD \
-              | grep '^namespaces/' \
-              | xargs -n1 dirname \
-              | sort -u
-          )
 
           if [[ -z "$changed_dirs" ]]; then
             echo "No namespaces changed."
