@@ -6,13 +6,10 @@ on:
   
 jobs:
  terraform:
-  name: Terraform-Deploy
   runs-on: ubuntu-latest
 
-#   defaults:
-#       run:
-#         working-directory: terraform-projects 
-
+  outputs:
+      dirs: ${{ steps.find_dirs.outputs.dirs }}
   env: 
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -20,19 +17,6 @@ jobs:
   steps:
     - name: checkout-code
       uses: actions/checkout@v4
-
-    # - name: find dir
-    #   shell: bash
-    #   run: |
-    #      git fetch origin main
-    #      git diff --name-only origin/main HEAD | grep '^namespaces/' | xargs -n1 dirname | sort -u
-
-    #       if [[ -z "$changed_dirs" ]]; then
-    #         echo "No namespaces changed."
-    #       else
-    #         printf "Changed namespace directories:\n%s\n" "$changed_dirs"
-    #         echo "dirs=$matrix" >> $GITHUB_OUTPUT
-    #       fi
 
     - name: Find changed namespace dirs
       id: find_dirs
@@ -63,3 +47,19 @@ jobs:
 
         # Export for use as a matrix or later steps
         echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
+
+ depploy:
+   needs: terraform
+   runs-on: ubuntu-latest
+   strategy:
+      matrix:
+        dir: ${{ fromJson(needs.find_changed.outputs.dirs) }}
+   steps:
+     - name: Checkout code
+       uses: actions/checkout@v4
+       with:
+          fetch-depth: 0
+
+     - name: Terraform in ${{ matrix.dir }}
+       shell: bash
+       run: pwd      
