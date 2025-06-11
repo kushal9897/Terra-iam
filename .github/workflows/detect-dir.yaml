@@ -31,4 +31,5 @@ jobs:
             echo "No namespaces changed."
           else
             printf "Changed namespace directories:\n%s\n" "$changed_dirs"
+            echo "dirs=$matrix" >> $GITHUB_OUTPUT
           fi
