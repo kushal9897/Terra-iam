@@ -62,4 +62,7 @@ jobs:
 
      - name: Terraform in ${{ matrix.dir }}
        shell: bash
-       run: pwd      
+       run: |
+        pwd
+        terraform plan
+
