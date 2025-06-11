@@ -2,7 +2,7 @@ name: Terraform Deploy (GitHub-hosted Runner)
 on:
  push:
     branches:
-     - main
+     - gitwork
   
 jobs:
  terraform:
@@ -22,13 +22,21 @@ jobs:
       uses: actions/checkout@v4
 
     - name: find dir
+      shell: bash
       run: |
-         ls
-         # fetch up-to-date main
-         git fetch origin main
+          # Make sure we have main locally
+          git fetch origin main
 
-         # list changed files vs. main, map to dirs, dedupe
-         git diff --name-only origin/main...HEAD \
-          | xargs -n1 dirname \
-          | sort -u
-  
+          # Diff against origin/main and filter only under namespaces/
+          changed_dirs=$(
+            git diff --name-only origin/main...HEAD \
+              | grep '^namespaces/' \
+              | xargs -n1 dirname \
+              | sort -u
+          )
+
+          if [[ -z "$changed_dirs" ]]; then
+            echo "No namespaces changed."
+          else
+            printf "Changed namespace directories:\n%s\n" "$changed_dirs"
+          fi
