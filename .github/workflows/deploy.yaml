@@ -36,7 +36,7 @@ jobs:
             exit 0
           fi
 
-            # 2) Apply your cut
+          # 2) Apply your cut
           echo "✂️  After cut -d/ -f1-2:"
           cut -d/ -f1-2 <<<"$changed_files" | sort -u | while read line; do
             echo "  $line"
