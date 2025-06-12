@@ -27,10 +27,7 @@ jobs:
       run: terraform init  
 
     - name: terraform-plan
-      run: |
-       terraform plan
-       echo "Sleeping for 5 minutes..."
-       sleep 300
+      run: ls
       
     # - name: terraform apply -auto-approve
     #   run: |
