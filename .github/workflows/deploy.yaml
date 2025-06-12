@@ -2,7 +2,7 @@ name: Terraform Deploy (GitHub-hosted Runner)
 on:
  push:
     branches:
-     - gitwork
+     - main
   
 jobs:
  terraform:
@@ -48,13 +48,11 @@ jobs:
         # Export for use as a matrix or later steps
         echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
 
- depploy:
+ deploy:
    needs: terraform
    strategy:
       matrix:
         dir: ${{ fromJson(needs.terraform.outputs.dirs) }}
    uses: ./.github/workflows/action.yaml
    with:
-        dir: ${{ matrix.dir }}
-
-
+     dir: ${{ matrix.dir }}
