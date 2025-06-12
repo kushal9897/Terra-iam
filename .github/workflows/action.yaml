@@ -27,10 +27,10 @@ jobs:
       uses: hashicorp/setup-terraform@v3
     
     - name: terraform-init
-      run: ls  
+      run: terraform init 
 
     - name: terraform-plan
-      run: pwd
+      run: terraform plan
       
     # - name: terraform apply -auto-approve
     #   run: |
