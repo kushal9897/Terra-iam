@@ -1,58 +1,58 @@
 name: Terraform Deploy (GitHub-hosted Runner)
 on:
- push:
+  push:
     branches:
-     - gitwork
-  
+      - gitwork
+
 jobs:
- terraform:
-  runs-on: ubuntu-latest
-
-  outputs:
+  terraform:
+    runs-on: ubuntu-latest
+    outputs:
       dirs: ${{ steps.find_dirs.outputs.dirs }}
-  env: 
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    env:
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-east-1
-  steps:
-    - name: checkout-code
-      uses: actions/checkout@v4
+      AWS_DEFAULT_REGION:    us-east-1
 
-    - name: Find changed namespace dirs
-      id: find_dirs
-      shell: bash
-      run: |
-        # 1. Fetch remote main
-        git fetch origin main
+    steps:
+      - name: checkout-code
+        uses: actions/checkout@v4
 
-        # 2. Get changed files under namespaces/, or empty
-        changed_files=$(git diff --name-only origin/main HEAD \
-          | grep '^namespaces/' || true)
+      - name: Find changed namespace dirs
+        id: find_dirs
+        shell: bash
+        run: |
+          # 1. Fetch remote main
+          git fetch origin main
 
-        # 3. Bail if none
-        if [[ -z "$changed_files" ]]; then
-          echo "No namespaces changed."
-          echo "dirs=[]" >> $GITHUB_OUTPUT
-          exit 0
-        fi
+          # 2. Get changed files under namespaces/, or empty
+          changed_files=$(git diff --name-only origin/main HEAD \
+            | grep '^namespaces/' || true)
 
-        # 4. Compute unique directory names
-        changed_dirs=$(printf "%s\n" "$changed_files" \
+          # 3. Bail if none
+          if [[ -z "$changed_files" ]]; then
+            echo "No namespaces changed."
+            echo "dirs=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # 4. Extract only the first two path segments (namespaces/<org>)
+          changed_dirs=$(printf "%s\n" "$changed_files" \
             | cut -d/ -f1-2 \
             | sort -u \
             | jq -R . | jq -s -c .)
 
-        # Print for human readability
-        echo "Changed namespace directories: $changed_dirs"
+          # Print for human readability
+          echo "Changed namespace directories: $changed_dirs"
 
-        # Export for use as a matrix or later steps
-        echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
+          # Export for use as a matrix or later steps
+          echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
 
- deploy:
-   needs: terraform
-   strategy:
+  deploy:
+    needs: terraform
+    strategy:
       matrix:
         dir: ${{ fromJson(needs.terraform.outputs.dirs) }}
-   uses: ./.github/workflows/action.yaml
-   with:
-     dir: ${{ matrix.dir }}
+    uses: ./.github/workflows/action.yaml
+    with:
+      dir: ${{ matrix.dir }}
