@@ -38,9 +38,9 @@ jobs:
 
         # 4. Compute unique directory names
         changed_dirs=$(printf "%s\n" "$changed_files" \
-          | xargs -n1 dirname \
-          | sort -u \
-          | jq -R . | jq -s -c .)
+            | cut -d/ -f1-2 \
+            | sort -u \
+            | jq -R . | jq -s -c .)
 
         # Print for human readability
         echo "Changed namespace directories: $changed_dirs"
