@@ -61,7 +61,7 @@ jobs:
           fetch-depth: 0
 
      - name: Terraform in ${{ matrix.dir }}
-       uses: ./.github/workflows/terraform-deploy.yaml
+       uses: ././.github/workflows/action.yaml
        with:
         dir: ${{ matrix.dir }}
 
