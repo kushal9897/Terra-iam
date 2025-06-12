@@ -36,6 +36,12 @@ jobs:
             exit 0
           fi
 
+            # 2) Apply your cut
+          echo "✂️  After cut -d/ -f1-2:"
+          cut -d/ -f1-2 <<<"$changed_files" | sort -u | while read line; do
+            echo "  $line"
+          done
+
           # 4. Extract only the first two path segments (namespaces/<org>)
           changed_dirs=$(printf "%s\n" "$changed_files" \
             | cut -d/ -f1-2 \
