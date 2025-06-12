@@ -30,7 +30,7 @@ jobs:
       run: ls  
 
     - name: terraform-plan
-      run: ls
+      run: pwd
       
     # - name: terraform apply -auto-approve
     #   run: |
