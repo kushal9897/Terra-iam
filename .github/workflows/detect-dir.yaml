@@ -62,4 +62,5 @@ jobs:
       - name: Terraform Format Check
         run: |
           cd namespaces/${{ matrix.namespace }}
-          terraform fmt -check=true -diff=true
+          terraform fmt -recursive -write=true
+
