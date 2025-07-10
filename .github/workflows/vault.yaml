@@ -1,64 +1,64 @@
 
-name: Cleanest Environment Setup
+# name: Cleanest Environment Setup
 
-on:
-  pull_request:
-    branches: [ "main" ]
-  push:
-    branches: [ "main" ]
+# on:
+#   pull_request:
+#     branches: [ "main" ]
+#   push:
+#     branches: [ "main" ]
 
-jobs:
-  terraform:
-    runs-on: ubuntu-latest
+# jobs:
+#   terraform:
+#     runs-on: ubuntu-latest
 
-    defaults:
-        run:
-          working-directory: ${{ inputs.dir }}
+#     defaults:
+#         run:
+#           working-directory: ${{ inputs.dir }}
           
-    environment: ${{ github.event_name == 'pull_request' && 'dev' || 'prod' }}
+#     environment: ${{ github.event_name == 'pull_request' && 'dev' || 'prod' }}
     
-    steps:
-      - name: Set File Names Based on Environment
-        run: |
-          # GitHub automatically loads the right environment's secrets
-          # We just need to set the file names
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "VAR_FILE=dev.tfvars" >> $GITHUB_ENV
-            echo "BACKEND_CONFIG=backend-dev.hcl" >> $GITHUB_ENV
-            echo "ENVIRONMENT=dev" >> $GITHUB_ENV
-          else
-            echo "VAR_FILE=prod.tfvars" >> $GITHUB_ENV
-            echo "BACKEND_CONFIG=backend-prod.hcl" >> $GITHUB_ENV
-            echo "ENVIRONMENT=prod" >> $GITHUB_ENV
-          fi
+#     steps:
+#       - name: Set File Names Based on Environment
+#         run: |
+#           # GitHub automatically loads the right environment's secrets
+#           # We just need to set the file names
+#           if [ "${{ github.event_name }}" = "pull_request" ]; then
+#             echo "VAR_FILE=dev.tfvars" >> $GITHUB_ENV
+#             echo "BACKEND_CONFIG=backend-dev.hcl" >> $GITHUB_ENV
+#             echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+#           else
+#             echo "VAR_FILE=prod.tfvars" >> $GITHUB_ENV
+#             echo "BACKEND_CONFIG=backend-prod.hcl" >> $GITHUB_ENV
+#             echo "ENVIRONMENT=prod" >> $GITHUB_ENV
+#           fi
 
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+#       - name: Checkout Repository
+#         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          # These come from the environment-specific secrets automatically!
-          role-to-assume: ${{ secrets.AWS_ROLE }}
-          aws-region: us-east-1
+#       - name: Configure AWS Credentials
+#         uses: aws-actions/configure-aws-credentials@v4
+#         with:
+#           # These come from the environment-specific secrets automatically!
+#           role-to-assume: ${{ secrets.AWS_ROLE }}
+#           aws-region: us-east-1
 
-      - name: Terraform Commands
-        run: |  
-          echo " Environment: ${{ env.ENVIRONMENT }}"
-          echo " Using: ${{ env.VAR_FILE }}"
-          echo " Backend: ${{ env.BACKEND_CONFIG }}"
+#       - name: Terraform Commands
+#         run: |  
+#           echo " Environment: ${{ env.ENVIRONMENT }}"
+#           echo " Using: ${{ env.VAR_FILE }}"
+#           echo " Backend: ${{ env.BACKEND_CONFIG }}"
           
-          terraform init --backend-config=${{ env.BACKEND_CONFIG }}
+#           terraform init --backend-config=${{ env.BACKEND_CONFIG }}
           
-          terraform plan --var-file=${{ env.VAR_FILE }}
+#           terraform plan --var-file=${{ env.VAR_FILE }}
           
-          # Apply only for production
-          if [ "${{ env.ENVIRONMENT }}" = "prod" ] && [ "${{ github.event_name }}" = "push" ]; then
-            terraform apply -auto-approve
-          fi
-        env:
-          # These come from environment-specific secrets automatically!
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
-          TF_VAR_environment: ${{ env.ENVIRONMENT }}
-          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+#           # Apply only for production
+#           if [ "${{ env.ENVIRONMENT }}" = "prod" ] && [ "${{ github.event_name }}" = "push" ]; then
+#             terraform apply -auto-approve
+#           fi
+#         env:
+#           # These come from environment-specific secrets automatically!
+#           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+#           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
+#           TF_VAR_environment: ${{ env.ENVIRONMENT }}
+#           VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
