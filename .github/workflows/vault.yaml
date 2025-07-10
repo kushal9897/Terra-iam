@@ -1,64 +1,94 @@
-
-# name: Cleanest Environment Setup
+# name: Terraform Deploy (GitHub-hosted Runner)
 
 # on:
-#   pull_request:
-#     branches: [ "main" ]
 #   push:
-#     branches: [ "main" ]
+#     branches:
+#       - gitwork
+#       - main
 
 # jobs:
 #   terraform:
 #     runs-on: ubuntu-latest
 
-#     defaults:
-#         run:
-#           working-directory: ${{ inputs.dir }}
-          
-#     environment: ${{ github.event_name == 'pull_request' && 'dev' || 'prod' }}
-    
-#     steps:
-#       - name: Set File Names Based on Environment
-#         run: |
-#           # GitHub automatically loads the right environment's secrets
-#           # We just need to set the file names
-#           if [ "${{ github.event_name }}" = "pull_request" ]; then
-#             echo "VAR_FILE=dev.tfvars" >> $GITHUB_ENV
-#             echo "BACKEND_CONFIG=backend-dev.hcl" >> $GITHUB_ENV
-#             echo "ENVIRONMENT=dev" >> $GITHUB_ENV
-#           else
-#             echo "VAR_FILE=prod.tfvars" >> $GITHUB_ENV
-#             echo "BACKEND_CONFIG=backend-prod.hcl" >> $GITHUB_ENV
-#             echo "ENVIRONMENT=prod" >> $GITHUB_ENV
-#           fi
+#     outputs:
+#       dirs: ${{ steps.find_dirs.outputs.dirs }}
 
-#       - name: Checkout Repository
+#     steps:
+#       - name: checkout-code
 #         uses: actions/checkout@v4
 
-#       - name: Configure AWS Credentials
-#         uses: aws-actions/configure-aws-credentials@v4
-#         with:
-#           # These come from the environment-specific secrets automatically!
-#           role-to-assume: ${{ secrets.AWS_ROLE }}
-#           aws-region: us-east-1
+#       - name: Find changed namespace dirs
+#         id: find_dirs
+#         shell: bash
+#         run: |
+#           git fetch origin main
 
-#       - name: Terraform Commands
-#         run: |  
-#           echo " Environment: ${{ env.ENVIRONMENT }}"
-#           echo " Using: ${{ env.VAR_FILE }}"
-#           echo " Backend: ${{ env.BACKEND_CONFIG }}"
-          
-#           terraform init --backend-config=${{ env.BACKEND_CONFIG }}
-          
-#           terraform plan --var-file=${{ env.VAR_FILE }}
-          
-#           # Apply only for production
-#           if [ "${{ env.ENVIRONMENT }}" = "prod" ] && [ "${{ github.event_name }}" = "push" ]; then
-#             terraform apply -auto-approve
+#           changed_files=$(git diff --name-only origin/main HEAD | grep '^namespaces/' || true)
+
+#           if [[ -z "$changed_files" ]]; then
+#             echo "No namespaces changed."
+#             echo "dirs=[]" >> $GITHUB_OUTPUT
+#             exit 0
 #           fi
-#         env:
-#           # These come from environment-specific secrets automatically!
-#           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
-#           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
-#           TF_VAR_environment: ${{ env.ENVIRONMENT }}
-#           VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
+
+#           changed_dirs=$(printf "%s\n" "$changed_files" \
+#             | cut -d/ -f2 \
+#             | sort -u \
+#             | jq -R . | jq -s -c .)
+
+#           echo "Changed namespace directories: $changed_dirs"
+#           echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
+
+#   terraform-check:
+#     runs-on: ubuntu-latest
+#     needs: terraform
+#     strategy:
+#       matrix:
+#         namespace: ${{ fromJson(needs.terraform.outputs.dirs) }}
+#     env:
+#       AWS_DEFAULT_REGION: us-east-1
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Setup Terraform
+#         uses: hashicorp/setup-terraform@v3
+#         with:
+#           terraform_version: 1.7.1
+
+#       - name: Set environment variables
+#         shell: bash
+#         run: |
+#           if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+#             echo "Using prod credentials"
+#             echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_PROD }}" >> $GITHUB_ENV
+#             echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+#             echo "BACKEND_CONFIG=backend-prod.hcl" >> $GITHUB_ENV
+#             echo "TFVARS_FILE=prod.tfvars" >> $GITHUB_ENV
+#             echo "TF_VAR_aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID_PROD }}" >> $GITHUB_ENV
+#             echo "TF_VAR_aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+#           else
+#             echo "Using dev credentials"
+#             echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID_DEV }}" >> $GITHUB_ENV
+#             echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}" >> $GITHUB_ENV
+#             echo "BACKEND_CONFIG=backend-dev.hcl" >> $GITHUB_ENV
+#             echo "TFVARS_FILE=dev.tfvars" >> $GITHUB_ENV
+#             echo "TF_VAR_aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID_DEV }}" >> $GITHUB_ENV
+#             echo "TF_VAR_aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}" >> $GITHUB_ENV
+
+#       - name: Terraform Init
+#         shell: bash
+#         run: |
+#           cd namespaces/${{ matrix.namespace }}
+#           terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure
+
+#       - name: Terraform Plan or Apply
+#         shell: bash
+#         run: |
+#           cd namespaces/${{ matrix.namespace }}
+#           if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+#             terraform apply -auto-approve --var-file=${{ env.TFVARS_FILE }}
+#           else
+#             terraform plan --var-file=${{ env.TFVARS_FILE }}
+#           fi
