@@ -205,27 +205,29 @@
   run: |
     cd namespaces/${{ matrix.namespace }}
 
-    echo "Checking if the Terraform state is locked..."
+    echo "🔍 Checking if the Terraform state is locked..."
 
-    # Try running init and capture any locking error
+    # Run terraform init and capture any lock-related error
     INIT_LOG=$(mktemp)
     terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure 2> "$INIT_LOG" || true
 
-    # Search for the lock ID in the logs
+    # Look for lock error and extract lock ID
     LOCK_ID=$(grep -oP 'Lock Info: \K.*' "$INIT_LOG" | head -n 1)
 
     if grep -q "Error acquiring the state lock" "$INIT_LOG"; then
-      echo " State is locked. Attempting to force unlock..."
+      echo "🔒 State is locked. Attempting to force unlock..."
       echo "Lock ID: $LOCK_ID"
 
       if [ -n "$LOCK_ID" ]; then
         terraform force-unlock -force "$LOCK_ID"
-        echo " State unlocked"
+        echo "✅ State unlocked. Re-running init..."
+        terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure
       else
-        echo " Lock ID not found. Cannot unlock automatically."
+        echo "❌ Lock ID not found. Cannot unlock automatically."
         cat "$INIT_LOG"
         exit 1
       fi
     else
-      echo " No state lock detected. Continuing..."
+      echo "✅ No state lock detected. Init completed successfully."
+      exit 0   # ✅ This line fixes the issue
     fi
