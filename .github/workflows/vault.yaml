@@ -198,3 +198,34 @@
 #           else
 #             terraform plan --var-file=${{ env.TFVARS_FILE }}
 #           fi
+
+ continue-on-error: true  
+- name: Check and Unlock Terraform State if Locked
+  shell: bash
+  run: |
+    cd namespaces/${{ matrix.namespace }}
+
+    echo "Checking if the Terraform state is locked..."
+
+    # Try running init and capture any locking error
+    INIT_LOG=$(mktemp)
+    terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure 2> "$INIT_LOG" || true
+
+    # Search for the lock ID in the logs
+    LOCK_ID=$(grep -oP 'Lock Info: \K.*' "$INIT_LOG" | head -n 1)
+
+    if grep -q "Error acquiring the state lock" "$INIT_LOG"; then
+      echo " State is locked. Attempting to force unlock..."
+      echo "Lock ID: $LOCK_ID"
+
+      if [ -n "$LOCK_ID" ]; then
+        terraform force-unlock -force "$LOCK_ID"
+        echo " State unlocked"
+      else
+        echo " Lock ID not found. Cannot unlock automatically."
+        cat "$INIT_LOG"
+        exit 1
+      fi
+    else
+      echo " No state lock detected. Continuing..."
+    fi
