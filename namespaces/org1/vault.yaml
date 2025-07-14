@@ -18,3 +18,60 @@
 
     echo "Changed namespace directories: $changed_dirs"
     echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
+
+
+
+
+
+ - name: Save successful namespaces
+        if: ${{ success() }}
+        run: echo "${{ matrix.namespace }}" >> passed_namespaces.txt
+
+      - name: Upload passed namespaces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: passed-namespaces
+          path: passed_namespaces.txt
+
+
+
+
+
+
+            terraform-apply:
+    needs: terraform-plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download passed namespaces
+        uses: actions/download-artifact@v4
+        with:
+          name: passed-namespaces
+
+      - name: Set matrix from passed namespaces
+        id: set-matrix
+        run: |
+          echo "Loading namespaces from artifact:"
+          cat passed_namespaces.txt
+          ns=$(cat passed_namespaces.txt | jq -R . | jq -s .)
+          echo "matrix=$ns" >> $GITHUB_OUTPUT
+
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+
+
+
+
+
+  terraform-apply-matrix:
+    needs: terraform-apply
+    strategy:
+      matrix:
+        namespace: ${{ fromJson(needs.terraform-apply.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Do Terraform Apply for ${{ matrix.namespace }}
+        run: |
+          cd namespaces/${{ matrix.namespace }}
+          terraform apply -auto-approve --var-file=...
