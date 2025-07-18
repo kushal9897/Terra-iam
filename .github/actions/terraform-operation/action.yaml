@@ -1,113 +1,59 @@
-name: 'Terraform Operation'
-description: 'Reusable action for Terraform operations (plan, apply, destroy, unlock)'
-
-inputs:
-  namespace:
-    description: 'Namespace to operate on (e.g., app1)'
-    required: true
-  environment:
-    description: 'Environment (dev or prod)'
-    required: true
-  action:
-    description: 'Terraform action to run (plan, apply, destroy, unlock)'
-    required: true
-  aws-access-key:
-    description: 'AWS Access Key'
-    required: true
-  aws-secret-key:
-    description: 'AWS Secret Key'
-    required: true
-  aws-region:
-    description: 'AWS Region'
-    required: true
-  vault-addr:
-    description: 'Vault address (e.g. https://vault.example.com)'
-    required: true
-  vault-role:
-    description: 'Vault role for OIDC'
-    required: true
-
-runs:
-  using: 'composite'
-  steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.7.1
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ inputs.aws-access-key }}
-        aws-secret-access-key: ${{ inputs.aws-secret-key }}
-        aws-region: ${{ inputs.aws-region }}
-
-    - name: Set environment variables
-      shell: bash
-      run: |
-        echo "ENVIRONMENT=${{ inputs.environment }}" >> $GITHUB_ENV
-        echo "NAMESPACE=${{ inputs.namespace }}" >> $GITHUB_ENV
-        echo "BACKEND_CONFIG=backend-${{ inputs.environment }}.hcl" >> $GITHUB_ENV
-        echo "TFVARS_FILE=${{ inputs.environment }}.tfvars" >> $GITHUB_ENV
-        echo "WORKING_DIR=namespaces/${{ inputs.namespace }}" >> $GITHUB_ENV
-
-    - name: Authenticate with Vault via GitHub OIDC
-      shell: bash
-      run: |
-        echo "Requesting GitHub OIDC token"
-        export JWT_TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://github.com/${{ github.repository }}" | jq -r '.value')
-
-        VAULT_ADDR="${{ inputs.vault-addr }}"
-        VAULT_ROLE="${{ inputs.vault-role }}"
-        VAULT_NAMESPACE="admin"
-
-        echo "Authenticating with Vault"
-        RESPONSE=$(curl -sSL --request POST \
-          --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
-          --data "{\"jwt\": \"${JWT_TOKEN}\", \"role\": \"${VAULT_ROLE}\"}" \
-          $VAULT_ADDR/v1/auth/jwt/login)
-
-        export VAULT_TOKEN=$(echo "$RESPONSE" | jq -r '.auth.client_token')
-
-        if [ "$VAULT_TOKEN" == "null" ] || [ -z "$VAULT_TOKEN" ]; then
-          echo "Vault authentication failed"
-          echo "$RESPONSE"
-          exit 1
-        fi
-
-        echo "::add-mask::$VAULT_TOKEN"
-        echo "VAULT_TOKEN=$VAULT_TOKEN" >> $GITHUB_ENV
-        echo "VAULT_ADDR=$VAULT_ADDR" >> $GITHUB_ENV
-
-    - name: Terraform Init
-      shell: bash
-      run: |
-        cd ${{ env.WORKING_DIR }}
-        terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure
-
-    - name: Terraform Plan/Apply/Destroy
-      shell: bash
-      env:
-        VAULT_TOKEN: ${{ env.VAULT_TOKEN }}
-        VAULT_ADDR: ${{ env.VAULT_ADDR }}
-        TF_VAR_aws_access_key: ${{ inputs.aws-access-key }}
-        TF_VAR_aws_secret_key: ${{ inputs.aws-secret-key }}
-      run: |
-        cd ${{ env.WORKING_DIR }}
-
-        if [[ "${{ inputs.action }}" == "plan" ]]; then
-          terraform plan --var-file=${{ env.TFVARS_FILE }} -out=tfplan
-        elif [[ "${{ inputs.action }}" == "apply" ]]; then
-          terraform apply --auto-approve --var-file=${{ env.TFVARS_FILE }}
-        elif [[ "${{ inputs.action }}" == "destroy" ]]; then
-          terraform destroy --auto-approve --var-file=${{ env.TFVARS_FILE }}
-        elif [[ "${{ inputs.action }}" == "unlock" ]]; then
-          echo "Force unlock not implemented yet"
-        else
-          echo "Invalid action"
-          exit 1
-        fi
+- name: Find changed namespace dirs and tfvars
+  id: find_dirs
+  shell: bash
+  run: |
+    git fetch origin main
+    changed_files=$(git diff --name-only origin/main HEAD | grep '^namespaces/' || true)
+    if [[ -z "$changed_files" ]]; then
+      echo "No namespaces changed."
+      echo "matrix=[]" >> $GITHUB_OUTPUT
+      exit 0
+    fi
+    
+    # Get unique changed namespace directories
+    changed_dirs=$(printf "%s\n" "$changed_files" \
+      | cut -d/ -f2 \
+      | sort -u)
+    
+    echo "Changed namespace directories: $changed_dirs"
+    
+    # Build matrix with namespace and environment combinations
+    matrix_items=()
+    
+    for namespace in $changed_dirs; do
+      namespace_path="namespaces/$namespace"
+      
+      # Check if namespace directory exists
+      if [[ ! -d "$namespace_path" ]]; then
+        echo "Warning: Directory $namespace_path does not exist, skipping..."
+        continue
+      fi
+      
+      # Check for dev.tfvars
+      if [[ -f "$namespace_path/dev.tfvars" ]]; then
+        matrix_items+=("{\"namespace\":\"$namespace\",\"environment\":\"dev\",\"tfvars_file\":\"dev.tfvars\",\"backend_config\":\"backend-dev.hcl\"}")
+        echo "Found: $namespace with dev.tfvars"
+      fi
+      
+      # Check for prod.tfvars
+      if [[ -f "$namespace_path/prod.tfvars" ]]; then
+        matrix_items+=("{\"namespace\":\"$namespace\",\"environment\":\"prod\",\"tfvars_file\":\"prod.tfvars\",\"backend_config\":\"backend-prod.hcl\"}")
+        echo "Found: $namespace with prod.tfvars"
+      fi
+      
+      # Warn if no tfvars files found
+      if [[ ! -f "$namespace_path/dev.tfvars" && ! -f "$namespace_path/prod.tfvars" ]]; then
+        echo "Warning: No dev.tfvars or prod.tfvars found in $namespace_path"
+      fi
+    done
+    
+    # Convert array to JSON matrix format
+    if [[ ${#matrix_items[@]} -eq 0 ]]; then
+      echo "No valid namespace-environment combinations found."
+      echo "matrix=[]" >> $GITHUB_OUTPUT
+    else
+      # Join array elements with commas and wrap in brackets
+      matrix_json="[$(IFS=','; echo "${matrix_items[*]}")]"
+      echo "Matrix JSON: $matrix_json"
+      echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+    fi
