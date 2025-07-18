@@ -1,7 +1,7 @@
-module "team_a" {
+module "team_b" {
   source        = "../../modules"
   ami           = var.ami
   instance_type = "t2.micro"
-  name          = "team-a-instance"
-  team          = "team-a"
+  name          = "team-b-instance"
+  team          = "team-b"
 }

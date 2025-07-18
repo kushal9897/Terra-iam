@@ -1,0 +1,300 @@
+name: Terraform Deploy in vault file (GitHub-hosted Runner)
+
+on:
+  push:
+    branches:
+      - features/githubaction
+      - main
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  terraform:
+    runs-on: custom-actions-runner
+    outputs:
+      dirs: ${{ steps.find_dirs.outputs.dirs }}
+    steps:
+      - name: checkout-code
+        uses: actions/checkout@v4
+
+      - name: Find changed namespace dirs
+        id: find_dirs
+        shell: bash
+        run: |
+          git fetch origin main
+          changed_files=$(git diff --name-only origin/main HEAD | grep '^namespaces/' || true)
+          if [[ -z "$changed_files" ]]; then
+            echo "No namespaces changed."
+            echo "dirs=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          changed_dirs=$(printf "%s\n" "$changed_files" \
+            | cut -d/ -f2 \
+            | sort -u \
+            | jq -R . | jq -s -c .)
+          echo "Changed namespace directories: $changed_dirs"
+          echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
+
+  terraform-plan:
+    runs-on: custom-actions-runner
+    needs: terraform
+    continue-on-error: true
+    strategy:
+      matrix:
+        namespace: ${{ fromJson(needs.terraform.outputs.dirs) }}
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'tf-plan-dev' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Set environment variables
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            echo "ENVIROMENT=PROD">> $GITHUB_ENV
+            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY}}" >> $GITHUB_ENV
+            echo "BACKEND_CONFIG=backend-prod.hcl" >> $GITHUB_ENV
+            echo "TFVARS_FILE=prod.tfvars" >> $GITHUB_ENV
+            echo "TF_VAR_aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID_PROD }}" >> $GITHUB_ENV
+            echo "TF_VAR_aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+          else
+            echo "ENVIROMENT=tf-plan-dev">> $GITHUB_ENV
+            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY }}" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_KEY }}" >> $GITHUB_ENV
+            echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> $GITHUB_ENV
+            echo "VAULT_ADDR=${{ secrets.VAULT_ADDR }}" >> $GITHUB_ENV
+            echo "VAULT_ROLE=${{ secrets.VAULT_ROLE }}" >> $GITHUB_ENV
+            echo "BACKEND_CONFIG=backend-dev.hcl" >> $GITHUB_ENV
+            echo "TFVARS_FILE=dev.tfvars" >> $GITHUB_ENV
+            echo "TF_VAR_aws_access_key=${{ secrets.AWS_ACCESS_KEY }}" >> $GITHUB_ENV
+            echo "TF_VAR_aws_secret_key=${{ secrets.AWS_SECRET_KEY }}" >> $GITHUB_ENV
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Authenticate with Vault via GitHub OIDC
+        id: vault-login
+        shell: bash
+        run: |
+          echo "Requesting GitHub OIDC token for Vault authentication"
+          export JWT_TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+           "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://github.com/test-repo-name" | jq -r '.value')
+          echo "Authenticating with Vault using OIDC"
+          VAULT_ADDR="${{ env.VAULT_ADDR }}"
+          VAULT_ROLE="${{ env.VAULT_ROLE }}"
+          VAULT_NAMESPACE="admin"
+          RESPONSE=$(curl -sSL --request POST \
+           --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
+           --data "{\"jwt\": \"${JWT_TOKEN}\", \"role\": \"${VAULT_ROLE}\"}" \
+           $VAULT_ADDR/v1/auth/jwt/login)
+          export VAULT_TOKEN=$(echo "$RESPONSE" | jq -r '.auth.client_token')
+          if [ "$VAULT_TOKEN" == "null" ] || [ -z "$VAULT_TOKEN" ]; then
+           echo "Vault authentication failed"
+           echo "$RESPONSE"
+           exit 1
+          fi
+          echo "Vault authentication successful"
+          echo "::add-mask::$VAULT_TOKEN"
+          echo "VAULT_TOKEN=$VAULT_TOKEN" >> $GITHUB_ENV
+          echo "VAULT_ADDR=$VAULT_ADDR" >> $GITHUB_ENV
+
+      # FIXED: Check and Unlock Terraform State if Locked
+      - name: Check and Unlock Terraform State if Locked
+        shell: bash
+        run: |
+          cd namespaces/${{ matrix.namespace }}
+          echo "Checking if the Terraform state is locked..."
+          # Run terraform init and capture any lock-related error
+          INIT_LOG=$(mktemp)
+          if terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure 2> "$INIT_LOG"; then
+            echo "No state lock detected. Init completed successfully."
+            exit 0
+          else
+            # Look for lock error and extract lock ID
+            if grep -q "Error acquiring the state lock" "$INIT_LOG"; then
+              echo "State is locked. Attempting to force unlock..."
+              LOCK_ID=$(grep -oP 'Lock Info:.*?ID:\s*\K[^\s]+' "$INIT_LOG" | head -n 1)
+              echo "Lock ID: $LOCK_ID"
+              if [ -n "$LOCK_ID" ]; then
+                terraform force-unlock -force "$LOCK_ID"
+                echo "State unlocked. Re-running init..."
+                terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure
+                echo "Re-init completed after unlock."
+              else
+                echo "Lock ID not found. Cannot unlock automatically."
+                cat "$INIT_LOG"
+                exit 1
+              fi
+            else
+              echo "Init failed for other reasons:"
+              cat "$INIT_LOG"
+              exit 1
+            fi
+          fi
+
+      - name: Terraform Init
+        shell: bash
+        run: |
+          cd namespaces/${{ matrix.namespace }}
+          echo "Running Terraform init for ${{ env.ENVIROMENT }}environment in ${{  matrix.namespace }} namespace"
+          terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure
+
+      - name: Terraform Plan
+        shell: bash
+        run: |
+          cd namespaces/${{ matrix.namespace }}
+          echo "Running Terraform plan for ${{ env.ENVIROMENT }}environment in ${{  matrix.namespace }} namespace"
+          terraform plan --var-file=${{ env.TFVARS_FILE }}
+
+      - name: Save successful namespaces
+        if: ${{ success() }}
+        run: echo "${{ matrix.namespace }}" >> passed_namespaces.txt
+
+      - name: Upload passed namespaces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: passed-namespaces-${{ matrix.namespace }}
+          path: passed_namespaces.txt
+
+  terraform-apply:
+    needs: terraform-plan
+    runs-on: custom-actions-runner
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # FIXED: Download all passed namespace artifacts
+      - name: Download passed namespaces
+        uses: actions/download-artifact@v4
+        with:
+          pattern: passed-namespaces-*
+          merge-multiple: true
+
+      - name: Set matrix from passed namespaces
+        id: set-matrix
+        run: |
+          echo "Loading namespaces from artifacts:"
+          # Combine all passed namespace files
+          find . -name "passed_namespaces.txt" -exec cat {} \; | sort -u > combined_namespaces.txt
+          cat combined_namespaces.txt
+          # Check if file exists and has content
+          if [ ! -s combined_namespaces.txt ]; then
+            echo "No passed namespaces found"
+            echo "matrix=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          namespaces=$(cat combined_namespaces.txt | grep -v '^$' | jq -R . | jq -s -c .)
+          echo "Processed namespaces: $namespaces"
+          echo "matrix=$namespaces" >> $GITHUB_OUTPUT
+
+  terraform-apply-matrix:
+    needs: terraform-apply
+    continue-on-error: true
+    strategy:
+      matrix:
+        namespace: ${{ fromJson(needs.terraform-apply.outputs.matrix) }}
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'tf-apply-dev' }}
+    runs-on: custom-actions-runner
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Set environment variables
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            echo "ENVIROMENT=tf-apply-prod">> $GITHUB_ENV
+            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY}}" >> $GITHUB_ENV
+            echo "BACKEND_CONFIG=backend-prod.hcl" >> $GITHUB_ENV
+            echo "TFVARS_FILE=prod.tfvars" >> $GITHUB_ENV
+            echo "TF_VAR_aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID_PROD }}" >> $GITHUB_ENV
+            echo "TF_VAR_aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}" >> $GITHUB_ENV
+          else
+            echo "ENVIROMENT=tf-apply-dev">> $GITHUB_ENV
+            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY }}" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_KEY }}" >> $GITHUB_ENV
+            echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> $GITHUB_ENV
+            echo "VAULT_ADDR=${{ secrets.VAULT_ADDR }}" >> $GITHUB_ENV
+            echo "VAULT_ROLE=${{ secrets.VAULT_ROLE }}" >> $GITHUB_ENV
+            echo "BACKEND_CONFIG=backend-dev.hcl" >> $GITHUB_ENV
+            echo "TFVARS_FILE=dev.tfvars" >> $GITHUB_ENV
+            echo "TF_VAR_aws_access_key=${{ secrets.AWS_ACCESS_KEY }}" >> $GITHUB_ENV
+            echo "TF_VAR_aws_secret_key=${{ secrets.AWS_SECRET_KEY }}" >> $GITHUB_ENV
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Authenticate with Vault via GitHub OIDC
+        id: vault-login
+        shell: bash
+        run: |
+          echo "Requesting GitHub OIDC token for Vault authentication"
+          export JWT_TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+           "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://github.com/test-repo-name" | jq -r '.value')
+          echo "Authenticating with Vault using OIDC"
+          VAULT_ADDR="${{ env.VAULT_ADDR }}"
+          VAULT_ROLE="${{ env.VAULT_ROLE }}"
+          VAULT_NAMESPACE="admin"
+          RESPONSE=$(curl -sSL --request POST \
+           --header "X-Vault-Namespace: $VAULT_NAMESPACE" \
+           --data "{\"jwt\": \"${JWT_TOKEN}\", \"role\": \"${VAULT_ROLE}\"}" \
+           $VAULT_ADDR/v1/auth/jwt/login)
+          export VAULT_TOKEN=$(echo "$RESPONSE" | jq -r '.auth.client_token')
+          if [ "$VAULT_TOKEN" == "null" ] || [ -z "$VAULT_TOKEN" ]; then
+           echo "Vault authentication failed"
+           echo "$RESPONSE"
+           exit 1
+          fi
+          echo "Vault authentication successful"
+          echo "::add-mask::$VAULT_TOKEN"
+          echo "VAULT_TOKEN=$VAULT_TOKEN" >> $GITHUB_ENV
+          echo "VAULT_ADDR=$VAULT_ADDR" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        shell: bash
+        run: |
+          cd namespaces/${{ matrix.namespace }}
+          terraform init --backend-config=${{ env.BACKEND_CONFIG }} --reconfigure
+
+      - name: Do Terraform Apply for ${{ matrix.namespace }}
+        run: |
+          cd namespaces/${{ matrix.namespace }}
+          terraform apply --auto-approve --var-file=${{ env.TFVARS_FILE }}

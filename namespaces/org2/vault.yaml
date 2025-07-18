@@ -1,0 +1,63 @@
+terraform-apply:
+  needs: terraform-plan
+  runs-on: ubuntu-latest
+  outputs:
+    matrix: ${{ steps.set-matrix.outputs.matrix }}
+  
+  steps:
+    - name: Download passed namespaces
+      uses: actions/download-artifact@v4
+      with:
+        name: passed-namespaces
+
+    - name: Set matrix from passed namespaces
+      id: set-matrix
+      run: |
+        echo "Loading namespaces from artifact:"
+        cat passed_namespaces.txt
+        echo "File size: $(wc -l < passed_namespaces.txt) lines"
+        echo "Raw file content:"
+        hexdump -C passed_namespaces.txt
+        
+        # Check if file exists and has content
+        if [ ! -s passed_namespaces.txt ]; then
+          echo "No passed namespaces found"
+          echo "matrix=[]" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Convert each line to a JSON array element
+        # Remove any empty lines and convert to JSON array
+        namespaces=$(cat passed_namespaces.txt | grep -v '^$' | jq -R . | jq -s .)
+        echo "Processed namespaces: $namespaces"
+        echo "matrix=$namespaces" >> $GITHUB_OUTPUT
+
+terraform-apply-matrix:
+  needs: terraform-apply
+  # Only run if there are namespaces to process
+  if: ${{ needs.terraform-apply.outputs.matrix != '[]' }}
+  strategy:
+    matrix:
+      namespace: ${{ fromJson(needs.terraform-apply.outputs.matrix) }}
+  runs-on: ubuntu-latest
+  
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.5.0  # Use your preferred version
+        
+    - name: Download terraform plan for ${{ matrix.namespace }}
+      uses: actions/download-artifact@v4
+      with:
+        name: terraform-plan-${{ matrix.namespace }}
+        path: namespaces/${{ matrix.namespace }}
+        
+    - name: Terraform Apply for ${{ matrix.namespace }}
+      run: |
+        cd namespaces/${{ matrix.namespace }}
+        terraform init
+        terraform apply -auto-approve tfplan

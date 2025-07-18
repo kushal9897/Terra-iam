@@ -1,34 +1,66 @@
 name: Terraform Deploy (GitHub-hosted Runner)
+
 on:
- push:
+  push:
     branches:
-     - main
-  
+      - gitwork
+
 jobs:
- terraform:
-  name: Terraform-Deploy
-  runs-on: ubuntu-latest
+  terraform:
+    runs-on: ubuntu-latest
 
-#   defaults:
-#       run:
-#         working-directory: terraform-projects 
+    outputs:
+      dirs: ${{ steps.find_dirs.outputs.dirs }}
 
-  env: 
+    env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: us-east-1
-  steps:
-    - name: checkout-code
-      uses: actions/checkout@v4
 
-    - name: find dir
-      run: |
-         ls
-         # fetch up-to-date main
-         git fetch origin main
+    steps:
+      - name: checkout-code
+        uses: actions/checkout@v4
 
-         # list changed files vs. main, map to dirs, dedupe
-         git diff --name-only origin/main...HEAD \
-          | xargs -n1 dirname \
-          | sort -u
-  
+      - name: Find changed namespace dirs
+        id: find_dirs
+        shell: bash
+        run: |
+          git fetch origin main
+
+          changed_files=$(git diff --name-only origin/main HEAD | grep '^namespaces/' || true)
+
+          if [[ -z "$changed_files" ]]; then
+            echo "No namespaces changed."
+            echo "dirs=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          changed_dirs=$(printf "%s\n" "$changed_files" \
+            | cut -d/ -f2 \
+            | sort -u \
+            | jq -R . | jq -s -c .)
+
+          echo "Changed namespace directories: $changed_dirs"
+          echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
+
+  terraform-check:
+    runs-on: ubuntu-latest
+    needs: terraform
+    strategy:
+      matrix:
+        namespace: ${{ fromJson(needs.terraform.outputs.dirs) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.1
+
+      - name: Terraform Format Check
+        run: |
+          cd namespaces/${{ matrix.namespace }}
+          terraform fmt -recursive -write=true
+
