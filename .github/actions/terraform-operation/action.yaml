@@ -6,54 +6,32 @@
     changed_files=$(git diff --name-only origin/main HEAD | grep '^namespaces/' || true)
     if [[ -z "$changed_files" ]]; then
       echo "No namespaces changed."
-      echo "matrix=[]" >> $GITHUB_OUTPUT
+      echo "dirs=[]" >> $GITHUB_OUTPUT
       exit 0
     fi
     
-    # Get unique changed namespace directories
-    changed_dirs=$(printf "%s\n" "$changed_files" \
-      | cut -d/ -f2 \
-      | sort -u)
+    echo "All changed files in namespaces:"
+    echo "$changed_files"
+    echo "---"
     
-    echo "Changed namespace directories: $changed_dirs"
+    # Filter files to only include dev.tfvars and prod.tfvars
+    changed_tfvars=$(echo "$changed_files" | grep -E '/(dev|prod)\.tfvars$' || true)
     
-    # Build matrix with namespace and environment combinations
-    matrix_items=()
-    
-    for namespace in $changed_dirs; do
-      namespace_path="namespaces/$namespace"
-      
-      # Check if namespace directory exists
-      if [[ ! -d "$namespace_path" ]]; then
-        echo "Warning: Directory $namespace_path does not exist, skipping..."
-        continue
-      fi
-      
-      # Check for dev.tfvars
-      if [[ -f "$namespace_path/dev.tfvars" ]]; then
-        matrix_items+=("{\"namespace\":\"$namespace\",\"environment\":\"dev\",\"tfvars_file\":\"dev.tfvars\",\"backend_config\":\"backend-dev.hcl\"}")
-        echo "Found: $namespace with dev.tfvars"
-      fi
-      
-      # Check for prod.tfvars
-      if [[ -f "$namespace_path/prod.tfvars" ]]; then
-        matrix_items+=("{\"namespace\":\"$namespace\",\"environment\":\"prod\",\"tfvars_file\":\"prod.tfvars\",\"backend_config\":\"backend-prod.hcl\"}")
-        echo "Found: $namespace with prod.tfvars"
-      fi
-      
-      # Warn if no tfvars files found
-      if [[ ! -f "$namespace_path/dev.tfvars" && ! -f "$namespace_path/prod.tfvars" ]]; then
-        echo "Warning: No dev.tfvars or prod.tfvars found in $namespace_path"
-      fi
-    done
-    
-    # Convert array to JSON matrix format
-    if [[ ${#matrix_items[@]} -eq 0 ]]; then
-      echo "No valid namespace-environment combinations found."
-      echo "matrix=[]" >> $GITHUB_OUTPUT
-    else
-      # Join array elements with commas and wrap in brackets
-      matrix_json="[$(IFS=','; echo "${matrix_items[*]}")]"
-      echo "Matrix JSON: $matrix_json"
-      echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+    if [[ -z "$changed_tfvars" ]]; then
+      echo "No dev.tfvars or prod.tfvars files changed."
+      echo "dirs=[]" >> $GITHUB_OUTPUT
+      exit 0
     fi
+    
+    echo "Changed tfvars files:"
+    echo "$changed_tfvars"
+    echo "---"
+    
+    # Extract unique namespace names from changed tfvars files
+    changed_dirs=$(printf "%s\n" "$changed_tfvars" \
+      | cut -d/ -f2 \
+      | sort -u \
+      | jq -R . | jq -s -c .)
+    
+    echo "Namespaces with changed tfvars: $changed_dirs"
+    echo "dirs=$changed_dirs" >> $GITHUB_OUTPUT
