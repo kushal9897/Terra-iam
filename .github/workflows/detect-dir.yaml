@@ -1,34 +1,34 @@
-name: Terraform Deploy (GitHub-hosted Runner)
-on:
- push:
-    branches:
-     - main
+# name: Terraform Deploy (GitHub-hosted Runner)
+# on:
+#  push:
+#     branches:
+#      - main
   
-jobs:
- terraform:
-  name: Terraform-Deploy
-  runs-on: ubuntu-latest
+# jobs:
+#  terraform:
+#   name: Terraform-Deploy
+#   runs-on: ubuntu-latest
 
-#   defaults:
-#       run:
-#         working-directory: terraform-projects 
+# #   defaults:
+# #       run:
+# #         working-directory: terraform-projects 
 
-  env: 
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_DEFAULT_REGION: us-east-1
-  steps:
-    - name: checkout-code
-      uses: actions/checkout@v4
+#   env: 
+#       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#       AWS_DEFAULT_REGION: us-east-1
+#   steps:
+#     - name: checkout-code
+#       uses: actions/checkout@v4
 
-    - name: find dir
-      run: |
-         ls
-         # fetch up-to-date main
-         git fetch origin main
+#     - name: find dir
+#       run: |
+#          ls
+#          # fetch up-to-date main
+#          git fetch origin main
 
-         # list changed files vs. main, map to dirs, dedupe
-         git diff --name-only origin/main...HEAD \
-          | xargs -n1 dirname \
-          | sort -u
+#          # list changed files vs. main, map to dirs, dedupe
+#          git diff --name-only origin/main...HEAD \
+#           | xargs -n1 dirname \
+#           | sort -u
   
